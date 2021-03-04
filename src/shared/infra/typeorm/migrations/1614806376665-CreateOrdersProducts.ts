@@ -40,6 +40,6 @@ export default class CreateOrdersProducts1614806376665
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.dropTable('orders_products');
+    await queryRunner.dropTable('order_products');
   }
 }
