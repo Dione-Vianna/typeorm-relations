@@ -4,6 +4,7 @@ import AppError from '@shared/errors/AppError';
 
 import IProductsRepository from '@modules/products/repositories/IProductsRepository';
 import ICustomersRepository from '@modules/customers/repositories/ICustomersRepository';
+import IUpdateProductsQuantityDTO from '@modules/products/dtos/IUpdateProductsQuantityDTO';
 import Order from '../infra/typeorm/entities/Order';
 import IOrdersRepository from '../repositories/IOrdersRepository';
 
@@ -29,63 +30,50 @@ class CreateOrderService {
   ) {}
 
   public async execute({ customer_id, products }: IRequest): Promise<Order> {
-    const customerExists = await this.customersRepository.findById(customer_id);
+    // TODO
+    const customer = await this.customersRepository.findById(customer_id);
 
-    if (!customerExists) {
-      throw new AppError('Could not find any customer with the given id');
+    if (!customer) {
+      throw new AppError('Customer not exist');
     }
 
-    const existenProducts = await this.productsRepository.findAllById(products);
-
-    if (!existenProducts) {
-      throw new AppError('Could not find any products with the given ids');
-    }
-
-    const existenProductsIds = existenProducts.map(product => product.id);
-
-    const checkIndexistentProducts = products.filter(
-      product => !existenProductsIds.includes(product.id),
+    const filteredProductsById = await this.productsRepository.findAllById(
+      products,
     );
 
-    if (checkIndexistentProducts.length) {
-      throw new AppError(
-        `Could not find product ${checkIndexistentProducts[0].id}`,
-      );
+    if (filteredProductsById.length !== products.length) {
+      throw new AppError('Inform valid products to create an order');
     }
 
-    const findProductsWithNoQuantityAvailable = products.filter(
-      product =>
-        existenProducts.filter(p => p.id === product.id)[0].quantity <=
-        product.quantity,
-    );
+    const updatedProducts: IUpdateProductsQuantityDTO[] = [];
 
-    if (findProductsWithNoQuantityAvailable.length) {
-      throw new AppError(
-        `The quantity ${findProductsWithNoQuantityAvailable[0].quantity} is not avaliable for ${findProductsWithNoQuantityAvailable[0].id}`,
-      );
-    }
+    const orderProducts = filteredProductsById.map(product => {
+      const productIndex = products.findIndex(item => item.id === product.id);
 
-    const serializerProducts = products.map(product => ({
-      product_id: product.id,
-      quantity: product.quantity,
-      price: existenProducts.filter(p => p.id === product.id)[0].price,
-    }));
+      if (product.quantity < products[productIndex].quantity) {
+        throw new AppError('Product has insufficient stock quantity');
+      }
 
-    const order = await this.ordersRepository.create({
-      customer: customerExists,
-      products: serializerProducts,
+      const { quantity } = products[productIndex];
+
+      updatedProducts.push({
+        id: product.id,
+        quantity: product.quantity - quantity,
+      });
+
+      return {
+        product_id: product.id,
+        price: product.price,
+        quantity,
+      };
     });
 
-    const { order_products } = order;
+    const order = await this.ordersRepository.create({
+      customer,
+      products: orderProducts,
+    });
 
-    const orderProductQuantity = order_products.map(product => ({
-      id: product.product_id,
-      quantity:
-        existenProducts.filter(p => p.id === product.product_id)[0].quantity -
-        product.quantity,
-    }));
-
-    await this.productsRepository.updateQuantity(orderProductQuantity);
+    await this.productsRepository.updateQuantity(updatedProducts);
 
     return order;
   }
